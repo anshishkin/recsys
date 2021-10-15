@@ -1,0 +1,14 @@
+[flake8]
+ignore = E712,E722
+max-line-length = 160
+exclude = 
+        ./debug/test.py,
+        ./test/test_unit.py,
+        ./test/test_requests.py,
+        ./dags/*,
+        ./flow_train_mlflow.py
+        ./flow_predict.py
+        ./flow_retraining.py
+        ./main.py
+        ./src/*
+max-complexity = 10

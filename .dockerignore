@@ -1,0 +1,7 @@
+.gitlab-ci.yml
+.git/
+.ci/
+*.pkl
+data/
+
+mlruns/

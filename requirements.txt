@@ -1,0 +1,12 @@
+sklearn
+pandas
+numpy
+scipy
+mlflow
+s3
+boto3
+fastapi
+uvicorn[standart]
+argparse
+flake8
+python-dotenv

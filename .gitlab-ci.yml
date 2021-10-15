@@ -1,0 +1,371 @@
+stages:  
+  - "build"
+  - "test"
+  - "train"
+  - "deploy"
+
+variables:
+  DAG_DIR: /home/user/airflow/dags/
+  # CI_JIRA_STAGE_PROCESS: "True"
+  # CI_JIRA_STAGE_MODELING: "True"
+  # CI_JIRA_STAGE_STAGING: "True"
+  # CI_JIRA_STAGE_DEPLOY: "True"
+###############################################################################
+
+build:
+  image: docker/compose
+  stage: build
+  rules:
+    - if : '$CI_JIRA_STAGE_MODELING=="True" && $CI_COMMIT_BRANCH!="master" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME!= "master"'
+      when: always
+    - if : '$CI_JIRA_STAGE_MODELING==null && $CI_COMMIT_BRANCH!="master" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME!= "master"'
+      when: manual  
+    - when: never   
+  before_script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+  script:
+    - docker-compose build kernel_svd
+    - docker-compose push kernel_svd
+  tags:
+   - dev
+   - docker
+
+################################################################################
+
+test:
+  image: docker/compose
+  stage: test
+  rules:
+    - if : '$CI_JIRA_STAGE_MODELING=="True" && $CI_COMMIT_BRANCH!="master" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME!= "master"'
+      when: always
+    - if : '$CI_JIRA_STAGE_MODELING==null && $CI_COMMIT_BRANCH!="master" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME!= "master"'
+      when: manual
+    - when: never   
+  before_script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+    - export $(xargs < .env)
+    - sed -i "s#\${S3_ENDPOINT_URL}#${S3_ENDPOINT_URL}#g" configs/s3_config.yml
+    - sed -i "s#\${S3_ACCESS_KEY_ID}#${S3_ACCESS_KEY_ID}#g" configs/s3_config.yml
+    - sed -i "s#\${S3_SECRET_ACCESS_KEY}#${S3_SECRET_ACCESS_KEY}#g" configs/s3_config.yml
+    - sed -i "s#\${S3_DEFAULT_REGION}#${S3_DEFAULT_REGION}#g" configs/s3_config.yml
+  script:
+    - export COMPOSE_FILE=docker-compose.yml:.ci/compose/test.docker-compose.yml
+    - docker-compose run --rm -T kernel_svd
+
+  # runner's tags
+  tags:
+   - dev
+   - docker
+
+#################################################################################
+
+train-mlflow:
+  image: docker/compose
+  stage: train
+  rules:
+    - if : '$CI_JIRA_STAGE_MODELING=="True" && $CI_COMMIT_BRANCH!="master" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME!= "master"'
+      when: always
+    - if : '$CI_JIRA_STAGE_MODELING==null && $CI_COMMIT_BRANCH!="master" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME!= "master"'
+      when: manual
+    - when: never   
+  before_script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+    - export $(xargs < .env)
+    - sed -i "s#\${S3_ENDPOINT_URL}#${S3_ENDPOINT_URL}#g" configs/s3_config.yml
+    - sed -i "s#\${S3_ACCESS_KEY_ID}#${S3_ACCESS_KEY_ID}#g" configs/s3_config.yml
+    - sed -i "s#\${S3_SECRET_ACCESS_KEY}#${S3_SECRET_ACCESS_KEY}#g" configs/s3_config.yml
+    - sed -i "s#\${S3_DEFAULT_REGION}#${S3_DEFAULT_REGION}#g" configs/s3_config.yml
+    - sed -i "s#\${MLFLOW_TRACKING_URI}#${MLFLOW_TRACKING_URI}#g" configs/s3_config.yml
+    - sed -i "s#\${PROJECT_NAME}#${PROJECT_NAME}#g" configs/s3_config.yml
+  script:
+    - export COMPOSE_HTTP_TIMEOUT=360
+    - export COMPOSE_FILE=docker-compose.yml:.ci/compose/train-ml.docker-compose.yml
+    - docker-compose pull 
+    - docker-compose run --rm -T kernel_svd
+  # runner's tags
+  tags:
+   - ml
+   - docker
+  #when: manual
+
+
+####################################################################################
+
+.deploy_image:
+  before_script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+    - export COMPOSE_FILE=docker-compose.yml:./prod.docker-compose.yml
+    - export $(xargs < .env)
+    #- export $(grep -v '^#' .env | xargs -d '\n')
+    - sed -i "s#\${S3_ENDPOINT_URL}#${S3_ENDPOINT_URL}#g" configs/s3_config.yml
+    - sed -i "s#\${S3_ACCESS_KEY_ID}#${S3_ACCESS_KEY_ID}#g" configs/s3_config.yml
+    - sed -i "s#\${S3_SECRET_ACCESS_KEY}#${S3_SECRET_ACCESS_KEY}#g" configs/s3_config.yml
+    - sed -i "s#\${S3_DEFAULT_REGION}#${S3_DEFAULT_REGION}#g" configs/s3_config.yml
+    - sed -i "s#\${MLFLOW_ID}#${MLFLOW_ID}#g" configs/production.yml
+    - sed -i "s#\${PROJECT_NAME}#${PROJECT_NAME}#g" configs/production.yml
+    #- echo "EXPOSE 8000" >> Dockerfile
+    #- echo "CMD uvicorn main:app --host 0.0.0.0 --port 8000" >> Dockerfile
+  script:
+    - docker-compose build kernel_svd
+    - docker-compose push kernel_svd
+
+#Deploy staging
+
+deploy-staging-a:
+  image: docker/compose
+  stage: deploy
+  extends: .deploy_image
+  rules:
+    - if : '$CI_JIRA_STAGE_STAGING=="True" && $CI_COMMIT_BRANCH!="master" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME!= "master"'
+      when: always
+    - if : '$CI_JIRA_STAGE_STAGING==null && $CI_COMMIT_BRANCH!="master" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME!= "master"'
+      when: manual
+    - when: never 
+  tags:
+    - ml
+    - docker
+  #when: manual
+#############################################################################
+deploy-staging-b:
+  image: docker/compose
+  stage: deploy
+  before_script:
+    # Add SSH client for alpine 
+    - export $(xargs < .env)
+    - export SSH_PRIVATE_KEY=`cat ./.ssh_key`
+    - apk add openssh-client
+    #- echo $SSH_PRIVATE_KEY
+    # Run the SSH client
+    - eval $(ssh-agent -s)
+    # Create the SSH directory and give it the right permissions
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh      
+    # Adding environment's variable SSH_PRIVATE_KEY to the SSH client's agent that manages the private keys
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
+    - sed -i "s#\${CI_COMMIT_BRANCH}#${CI_COMMIT_BRANCH}#g" dags/config.yml
+    - sed -i "s#\${S3_ENDPOINT_URL}#${S3_ENDPOINT_URL}#g" configs/s3_config.yml
+    - sed -i "s#\${S3_ACCESS_KEY_ID}#${S3_ACCESS_KEY_ID}#g" configs/s3_config.yml
+    - sed -i "s#\${S3_SECRET_ACCESS_KEY}#${S3_SECRET_ACCESS_KEY}#g" configs/s3_config.yml
+    - sed -i "s#\${S3_DEFAULT_REGION}#${S3_DEFAULT_REGION}#g" configs/s3_config.yml
+    - sed -i "s#\${MLFLOW_ID}#${MLFLOW_ID}#g" configs/production.yml
+    - sed -i "s#\${PROJECT_NAME}#${PROJECT_NAME}#g" configs/production.yml
+    - sed -i "s#\${PROJECT_NAME}#${PROJECT_NAME}#g" dags/config.yml
+    - sed -i "s#\${CI_REGISTRY_IMAGE}#${CI_REGISTRY_IMAGE}#g" dags/config.yml
+
+    # Connecting to the server using SSH and executing commands like pulling updates to the cloned repo
+  script:
+      # Connecting to the server using SSH and executing commands like pulling updates to the cloned repo
+      - export COMPOSE_HTTP_TIMEOUT=360
+      - export COMPOSE_FILE=docker-compose.yml:.ci/compose/retraining.docker-compose.yml
+      #- docker-compose pull
+      - docker-compose run --rm -T kernel_svd
+      - ssh -o StrictHostKeyChecking=no $DEPLOY_USER@$DEPLOY_HOST "if ! [ -d $DAG_DIR/${PROJECT_NAME}/${CI_COMMIT_BRANCH} ]; then mkdir -p $DAG_DIR/${PROJECT_NAME}/${CI_COMMIT_BRANCH}; fi"
+      - scp -o StrictHostKeyChecking=no -r dags/* $DEPLOY_USER@$DEPLOY_HOST:$DAG_DIR/${PROJECT_NAME}/${CI_COMMIT_BRANCH}
+      - ssh -o StrictHostKeyChecking=no $DEPLOY_USER@$DEPLOY_HOST "docker pull ${CI_REGISTRY_IMAGE}:${CI_COMMIT_BRANCH}"
+      - ssh -o StrictHostKeyChecking=no user@$DEPLOY_HOST "if ! [ -d $(docker ps -q --filter "name=${PROJECT_NAME}")]; then docker stop $(docker ps -q --filter "name=${PROJECT_NAME}"); fi"
+      #- ssh -o StrictHostKeyChecking=no $DEPLOY_USER@$DEPLOY_HOST "docker stop `docker ps --filter "name=kernelsvd" | awk '{ print $1 }' | tail -n +2` || true"
+      - ssh -o StrictHostKeyChecking=no user@$DEPLOY_HOST "docker run -p 8000:8000 --name ${PROJECT_NAME}_${CI_JOB_ID} -d ${CI_REGISTRY_IMAGE}:${CI_COMMIT_BRANCH}"
+      #- ssh $DEPLOY_HOST "if ! [ -d $DAG_APPLICATION_DIR ]; then mkdir -p $DAG_APPLICATION_DIR; fi"
+      #- scp  dags/* user@192.168.42.113:/home/user/airflow/dags/kernelsvd
+      # -o StrictHostKeyCheking=no is to disable strict host key checking in SSH
+  rules:
+    - if : '$CI_JIRA_STAGE_STAGING=="True" && $CI_COMMIT_BRANCH!="master" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME!= "master"'
+      when: always
+    - if : '$CI_JIRA_STAGE_STAGING==null && $CI_COMMIT_BRANCH!="master" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME!= "master"'
+      when: manual
+    - when: never 
+  # runner's tags
+  tags:
+   - ml
+   - docker
+  #when: manual
+############################################################################
+
+test_merge_requests:
+  image: docker/compose
+  stage: deploy    
+  # rules:
+  #   - if: $CI_COMMIT_BRANCH == "master" && $CI_PIPELINE_SOURCE == "push"
+  #     when: always
+  #   - when: never
+  before_script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+  script:
+    - export COMPOSE_FILE=docker-compose.yml:.ci/compose/merge.docker-compose.yml
+    - docker-compose run --rm -T kernel_svd
+  only:
+    - merge_requests
+  # runner's tags
+  tags:
+   - ml
+   - docker
+
+  # before_script:
+  #   - apk add --update git openssh-client
+  #   - mkdir ~/.ssh
+  #   - ssh-keyscan -p 2222 gitlab.talmer.local > ~/.ssh/known_hosts
+  #   - eval `ssh-agent -s`
+  #   #- ssh-add <(echo "$GITLAB_DEPLOY_KEY")
+  #   - echo $GITLAB_DEPLOY_KEY | ssh-add -
+  #   - ssh -T git@gitlab.talmer.local -p 2222
+  #   - git config --global user.email "$GITLAB_USER_EMAIL"
+  #   - git config --global user.name "$GITLAB_USER_ID"
+  #   - git remote set-url origin ssh://git@gitlab.talmer.local:2222/mlops/mlrec/kernel-svd.git
+  # script:    
+  #   - git checkout master
+  #   - git reset --hard origin/master
+  #   - git merge $CI_BUILD_REF
+  #   - git push origin master
+  # except:
+  #   - master
+  # dependencies:
+  #   - build
+  # # runner's tags
+  # tags:
+  #  - ml
+  #  - docker
+  #when: manual
+
+
+#PROD
+#####################################################################
+deploy-prod-a:
+  image: docker/compose
+  stage: deploy
+  extends: .deploy_image
+  rules:
+    - if : '$CI_JIRA_STAGE_DEPLOY=="True" && $CI_COMMIT_BRANCH=="master"'
+      when: always
+    - if : '$CI_JIRA_STAGE_DEPLOY==null && $CI_COMMIT_BRANCH=="master"'
+      when: manual
+    - when: never 
+  dependencies:
+    - build
+    - test
+  tags:
+    - ml
+    - docker
+  #when: manual
+##########################################################################
+deploy-prod-b:
+  image: docker/compose
+  stage: deploy
+  before_script:
+    # Add SSH client for alpine 
+    - export $(xargs < .env)
+    - export SSH_PRIVATE_KEY=`cat ./.ssh_key`
+    - apk add openssh-client
+    # Run the SSH client
+    - eval $(ssh-agent -s)
+    # Create the SSH directory and give it the right permissions
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh      
+    # Adding environment's variable SSH_PRIVATE_KEY to the SSH client's agent that manages the private keys
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
+    - sed -i "s#\${CI_COMMIT_BRANCH}#${CI_COMMIT_BRANCH}#g" dags/config.yml
+    - sed -i "s#\${S3_ENDPOINT_URL}#${S3_ENDPOINT_URL}#g" configs/s3_config.yml
+    - sed -i "s#\${S3_ACCESS_KEY_ID}#${S3_ACCESS_KEY_ID}#g" configs/s3_config.yml
+    - sed -i "s#\${S3_SECRET_ACCESS_KEY}#${S3_SECRET_ACCESS_KEY}#g" configs/s3_config.yml
+    - sed -i "s#\${S3_DEFAULT_REGION}#${S3_DEFAULT_REGION}#g" configs/s3_config.yml
+    - sed -i "s#\${MLFLOW_ID}#${MLFLOW_ID}#g" configs/production.yml
+    - sed -i "s#\${ROJECT_NAME}#${PROJECT_NAME}#g" configs/production.yml
+    - sed -i "s#\${PROJECT_NAME}#${PROJECT_NAME}#g" dags/config.yml
+    - sed -i "s#\${CI_REGISTRY_IMAGE}#${CI_REGISTRY_IMAGE}#g" dags/config.yml
+    - printenv CI_PROJECT_NAME
+    # Connecting to the server using SSH and executing commands like pulling updates to the cloned repo
+  script:
+      # Connecting to the server using SSH and executing commands like pulling updates to the cloned repo
+      - ssh -o StrictHostKeyChecking=no $DEPLOY_USER@$DEPLOY_HOST "rm -rf $DAG_DIR/${PROJECT_NAME}/*"
+      - ssh -o StrictHostKeyChecking=no $DEPLOY_USER@$DEPLOY_HOST "if ! [ -d $DAG_DIR/${PROJECT_NAME}/${CI_COMMIT_BRANCH} ]; then mkdir -p $DAG_DIR/${PROJECT_NAME}/${CI_COMMIT_BRANCH}; fi"
+      - scp -o StrictHostKeyChecking=no -r dags/* $DEPLOY_USER@$DEPLOY_HOST:$DAG_DIR/${PROJECT_NAME}/${CI_COMMIT_BRANCH}
+      - ssh -o StrictHostKeyChecking=no $DEPLOY_USER@$DEPLOY_HOST "docker pull ${CI_REGISTRY_IMAGE}:${CI_COMMIT_BRANCH}"
+      - ssh -o StrictHostKeyChecking=no $DEPLOY_USER@$DEPLOY_HOST "if ! [ -d $(docker ps -q --filter "name=${PROJECT_NAME}")]; then docker stop $(docker ps -q --filter "name=${PROJECT_NAME}"); fi"
+      #- ssh -o StrictHostKeyChecking=no user@$DEPLOY_HOST "if ! $(docker ps |grep kernel-svd]) ; then docker stop $(docker ps |grep kernel-svd);fi "
+      - ssh -o StrictHostKeyChecking=no $DEPLOY_USER@$DEPLOY_HOST "docker run -p 8000:8000 --name ${PROJECT_NAME}_${CI_JOB_ID} -d ${CI_REGISTRY_IMAGE}:${CI_COMMIT_BRANCH}"
+      #- ssh $DEPLOY_HOST "if ! [ -d $DAG_APPLICATION_DIR ]; then mkdir -p $DAG_APPLICATION_DIR; fi"
+      #- scp  dags/* user@192.168.42.113:/home/user/airflow/dags/kernelsvd
+      # -o StrictHostKeyCheking=no is to disable strict host key checking in SSH
+  rules:
+    - if : '$CI_JIRA_STAGE_DEPLOY=="True" && $CI_COMMIT_BRANCH=="master"'
+      when: always
+    - if : '$CI_JIRA_STAGE_DEPLOY==null && $CI_COMMIT_BRANCH=="master"'
+      when: manual
+    - when: never 
+  # runner's tags
+  tags:
+   - ml
+   - docker
+###########################################################################################
+
+# deploy-prod-c:
+#   image: docker/compose
+#   stage: deploy
+#   before_script:
+#     - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+#   script:
+#     - export COMPOSE_FILE=docker-compose.yml:.ci/compose/prod.docker-compose.yml
+#     - export COMPOSE_PROJECT_NAME=prod-kernel-svd
+#     - docker-compose pull
+#     - docker-compose up -d --remove-orphans
+#     - sleep 5
+#     - docker-compose logs --tail 200
+#     # - $CI_ENVIRONMENT_URL
+#   environment:
+#     name: prod
+#     url: http://192.168.42.113:8000/docs
+#   only:
+#     - master
+#   # runner's tags
+#   when: manual
+#   tags:
+#    - ml
+#    - docker
+
+################################################################################
+#
+# pipeline-components-a:
+#   image:
+#     name: minio/mc
+#     entrypoint: ['']
+#   stage: pipeline-components
+#   before_script:
+#     - mc alias set minio $MINIO_HOST $MINIO_ACCESS_KEY $MINIO_SECRET_KEY
+#   script:
+#     - mc cp dags/* minio/airflow/dags
+#   except:
+#     - master
+#   dependencies:
+#     - build
+#     - test
+#   tags:
+#    - ml
+#    - docker
+
+# #################################################################################
+
+# deploy-staging_:
+#   image: docker/compose
+#   stage: deploy
+#   before_script:
+#     - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+#   script:
+#     - export COMPOSE_FILE=docker-compose.yml:.ci/compose/staging.docker-compose.yml
+#     - export COMPOSE_PROJECT_NAME=staging-kernel-svd
+#     - docker-compose pull
+#     - docker-compose up -d --remove-orphans
+#     - sleep 5
+#     - docker-compose logs --tail 200
+#     # - $CI_ENVIRONMENT_URL
+#   environment:
+#     name: staging
+#     url: http://192.168.42.110:18000/docs
+#   except:
+#     - master
+#   dependencies:
+#     - build
+#     - test
+#   # runner's tags
+#   when: manual
+#   tags:
+#    - ml
+#    - docker

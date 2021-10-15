@@ -1,0 +1,19 @@
+name: kernelsvd
+channels:
+  - defaults
+dependencies:
+  - pip
+  - pip:
+    - mlflow
+    - sklearn
+    - pandas
+    - numpy
+    - scipy
+    - boto3
+    - s3
+    - argparse
+    - fastapi
+    - uvicorn[standart]
+    - argparse
+    - flake8
+    - python-dotenv

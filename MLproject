@@ -1,0 +1,7 @@
+name: kernelsvd
+
+entry_points:
+  main:
+    parameters:
+      n_com: {type: int, default: 10}
+    command: "python src/flow_train_mlflow.py --n_com {n_com}"

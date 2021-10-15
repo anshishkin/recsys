@@ -1,0 +1,1 @@
+autopep8 -r --in-place --verbose ./..

@@ -1,0 +1,3 @@
+branch_name: ${CI_COMMIT_BRANCH}
+project_name: ${PROJECT_NAME}
+registry_image: ${CI_REGISTRY_IMAGE}

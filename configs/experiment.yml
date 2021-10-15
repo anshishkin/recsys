@@ -1,0 +1,4 @@
+exp_parametrs:
+  name_exp: ${PROJECT_NAME}
+  n_com: [10,15,20,25,30]
+  

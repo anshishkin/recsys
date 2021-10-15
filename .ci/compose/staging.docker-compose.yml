@@ -1,0 +1,11 @@
+version: '3.1'
+
+services:
+
+  kernel_svd:
+    image: ${CI_REGISTRY_IMAGE:-kernel_svd}
+    env_file:
+      - secrets.env
+    ports:
+      - "18000:8000"
+    command: uvicorn main:app --port 8000 --host 0.0.0.0

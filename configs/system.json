@@ -1,0 +1,5 @@
+{
+    "runs_root_path": '/home/',
+    "dataset": "ratings.csv"
+    
+}

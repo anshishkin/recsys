@@ -1,0 +1,1 @@
+autoflake -r --in-place --verbose --remove-unused-variables --remove-all-unused-imports ./..

@@ -1,0 +1,4 @@
+Host ${DEPLOY_HOST}
+  HostName ${DEPLOY_HOST}
+  User ${DEPLOY_USER}
+  StrictHostKeyChecking no
